@@ -1,0 +1,39 @@
+{
+  "evaluation_kind": "single duplicate-safe stratified held-out split; not nested model selection",
+  "model": "TF-IDF stacking (ROS in all four learners)",
+  "split": {
+    "input_rows": 17880,
+    "unique_rows": 17565,
+    "duplicates_removed": 315,
+    "train_rows": 14052,
+    "test_rows": 3513,
+    "overlapping_postings": 0,
+    "train_split_sha256": "1bf5aa78e0f1806b4b5ef345d516d3fa042313516be1266047e88c9263f81c07",
+    "test_split_sha256": "c5df22958ca64ae08e965dbf628a33a61834858f8fbae99d87243538f41d7db5",
+    "random_state": 42
+  },
+  "metrics": {
+    "accuracy": 0.9829205807002562,
+    "precision": 0.87248322147651,
+    "recall": 0.7602339181286549,
+    "f1": 0.8125,
+    "roc_auc": 0.984548944673673,
+    "average_precision": 0.8809296966460858,
+    "confusion_matrix": [
+      [
+        3323,
+        19
+      ],
+      [
+        41,
+        130
+      ]
+    ]
+  },
+  "model_sha256": "79aa300e1fcc6e698cf972c41c3bae6ca4b6062114bd63c37735af71a9d52e6f",
+  "dataset_sha256": "cec194ca0185a973d9c339d7d83c43d80fb65b2efdcd5f5a7a12c80c85cae3e2",
+  "python": "3.12.14",
+  "sklearn": "1.8.0",
+  "training_seconds": 460.48213386535645,
+  "limitation": "Exact-duplicate removal does not exclude all semantic/company overlap or dataset shift; scores are not calibrated probabilities."
+}

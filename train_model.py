@@ -17,6 +17,13 @@ Output:
 """
 
 import time
+import json
+import hashlib
+import platform
+from pathlib import Path
+import sklearn
+import argparse
+from evaluation import prepare_split
 
 import joblib
 import numpy as np
@@ -245,6 +252,13 @@ def build_stacking_model():
 # ============================================================
 
 def main():
+    global DATA_PATH, MODEL_OUT
+    parser = argparse.ArgumentParser(description="Train and evaluate duplicate-safe stacking")
+    parser.add_argument("--data", default=DATA_PATH)
+    parser.add_argument("--model-out", default=MODEL_OUT)
+    parser.add_argument("--metrics-out", default="artifacts/metrics.json")
+    args = parser.parse_args()
+    DATA_PATH, MODEL_OUT = args.data, args.model_out
 
     print("=" * 60)
     print("Fake Job Postings Detection")
@@ -265,24 +279,9 @@ def main():
     # Target
     # --------------------------------------------------------
 
-    y = df["fraudulent"]
-
-    print("\nClass distribution:")
-    print(y.value_counts())
-
-    # --------------------------------------------------------
-    # Train / Test Split
-    # --------------------------------------------------------
-
-    print("\nSplitting dataset...")
-
-    X_train_raw, X_test_raw, y_train, y_test = train_test_split(
-        df,
-        y,
-        test_size=0.2,
-        random_state=RANDOM_STATE,
-        stratify=y,
-    )
+    train, test, split_info = prepare_split(df, random_state=RANDOM_STATE)
+    X_train_raw, y_train = train.drop(columns=["fraudulent"]), train["fraudulent"]
+    X_test_raw, y_test = test.drop(columns=["fraudulent"]), test["fraudulent"]
 
     print("Training samples:", len(X_train_raw))
     print("Testing samples :", len(X_test_raw))
@@ -398,11 +397,29 @@ def main():
 
     print("\nSaving trained model...")
 
+    Path(MODEL_OUT).parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(
         full_pipeline,
         MODEL_OUT,
         compress=3,
     )
+
+    from sklearn.metrics import average_precision_score, confusion_matrix
+    manifest = {
+        "evaluation_kind": "single duplicate-safe stratified held-out split; not nested model selection",
+        "model": "TF-IDF stacking (ROS in all four learners)",
+        "split": split_info,
+        "metrics": {"accuracy": accuracy, "precision": precision, "recall": recall, "f1": f1,
+                    "roc_auc": roc_auc, "average_precision": float(average_precision_score(y_test, y_prob)),
+                    "confusion_matrix": confusion_matrix(y_test, y_pred).tolist()},
+        "model_sha256": hashlib.sha256(Path(MODEL_OUT).read_bytes()).hexdigest(),
+        "dataset_sha256": hashlib.sha256(Path(DATA_PATH).read_bytes()).hexdigest(),
+        "python": platform.python_version(), "sklearn": sklearn.__version__,
+        "training_seconds": training_time,
+        "limitation": "Exact-duplicate removal does not exclude all semantic/company overlap or dataset shift; scores are not calibrated probabilities."
+    }
+    output = Path(args.metrics_out); output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     print(
         f"\nModel saved successfully:"

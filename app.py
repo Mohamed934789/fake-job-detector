@@ -11,6 +11,9 @@ present in the same folder.
 """
 
 import os
+import json
+import hashlib
+from pathlib import Path
 import re
 
 import joblib
@@ -30,7 +33,10 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-MODEL_PATH = "fake_job_stacking_model.joblib"
+ROOT = Path(__file__).resolve().parent
+MODEL_PATH = str(ROOT / "fake_job_stacking_model.joblib")
+METRICS_PATH = ROOT / "artifacts" / "metrics.json"
+metrics = json.loads(METRICS_PATH.read_text()) if METRICS_PATH.exists() else None
 
 # ----------------------------------------------------------------------
 # Custom CSS — dark glassmorphism theme
@@ -183,13 +189,18 @@ footer {visibility: hidden;}
 # Model loading
 # ----------------------------------------------------------------------
 @st.cache_resource(show_spinner=False)
-def load_model(path):
+def load_model(path, expected_hash):
+    if (not os.path.exists(path) or not metrics
+            or hashlib.sha256(Path(path).read_bytes()).hexdigest() != expected_hash):
+        return None
     if not os.path.exists(path):
         return None
     return joblib.load(path)
 
 
-model = load_model(MODEL_PATH)
+model = load_model(MODEL_PATH, metrics.get("model_sha256") if metrics else None)
+if model is None:
+    st.warning("No model matches the measured artifact. Run python train_model.py before prediction.")
 
 # ----------------------------------------------------------------------
 # Sidebar
@@ -213,8 +224,8 @@ with st.sidebar:
         (Logistic Regression + Linear SVC + Random Forest + XGBoost,
         meta-learner: Logistic Regression)
 
-        **Test F1-score:** 0.850
-        **Test ROC-AUC:** 0.983
+        **Evaluation:** see the measured artifact on the Model Performance page.
+        Exact duplicate postings are removed before splitting.
         """
     )
     st.markdown("---")
@@ -238,12 +249,12 @@ st.markdown(
     <div class="hero-title">Fake Job Posting Detector</div>
     <div class="hero-sub">
         Paste a job listing and the model — a Stacking Ensemble trained on
-        17,880 real-world postings — estimates the probability that it's
+        a duplicate-safe training split — estimates a risk score that it's
         fraudulent, based on its text and metadata.
     </div>
     <div style="margin-top:1rem;">
-        <span class="metric-pill">🎯 F1 0.850</span>
-        <span class="metric-pill">📈 ROC-AUC 0.983</span>
+        <span class="metric-pill">Measured held-out evaluation</span>
+        <span class="metric-pill">Duplicate-safe split</span>
         <span class="metric-pill">🧠 4 base models + meta-learner</span>
     </div>
 </div>
@@ -253,7 +264,7 @@ st.markdown(
 
 if model is None:
     st.error(
-        f"⚠️ Model file **{MODEL_PATH}** was not found next to app.py.\n\n"
+        f"⚠️ Model file **{MODEL_PATH}** is missing or does not match the measured manifest.\n\n"
         "Run `python train_model.py` first (with `fake_job_postings.csv` in the same "
         "folder) to generate it, then restart this app."
     )
@@ -589,19 +600,20 @@ else:
     st.write(
         "Several model families were benchmarked on the same train/test split "
         "using TF-IDF text features, categorical/metadata features, and class-imbalance "
-        "handling (SMOTE / Random Over-Sampling). The Stacking ensemble — combining "
+        "handling (Random Over-Sampling). The Stacking ensemble — combining "
         "Logistic Regression, Linear SVC, Random Forest and XGBoost under a Logistic "
         "Regression meta-learner — gave the best overall balance of precision and recall."
     )
 
-    perf = pd.DataFrame(
-        [
-            {"Model": "Stacking Ensemble", "Accuracy": 0.987, "Precision": 0.950, "Recall": 0.769, "F1": 0.850, "ROC-AUC": 0.983},
-            {"Model": "Logistic Regression + ROS", "Accuracy": 0.984, "Precision": 0.866, "Recall": 0.786, "F1": 0.824, "ROC-AUC": 0.985},
-            {"Model": "Hard Voting", "Accuracy": 0.984, "Precision": 0.992, "Recall": 0.676, "F1": 0.804, "ROC-AUC": None},
-        ]
-    )
+    if not metrics:
+        st.info("Train the model to generate a measured evaluation artifact.")
+        st.stop()
+    measured = metrics["metrics"]
+    perf = pd.DataFrame([{"Model": "Stacking Ensemble", "Accuracy": measured["accuracy"],
+        "Precision": measured["precision"], "Recall": measured["recall"], "F1": measured["f1"], "ROC-AUC": measured["roc_auc"]}])
     st.dataframe(perf, use_container_width=True, hide_index=True)
+    st.json(metrics["split"])
+    st.caption(metrics["limitation"])
 
     fig = go.Figure()
     for metric, color in [("Precision", "#7C3AED"), ("Recall", "#38BDF8"), ("F1", "#F472B6")]:
@@ -624,9 +636,9 @@ else:
         2. **Feature engineering** — combined text (`title + description + requirements + benefits`),
            text-length features, and information-availability flags
            (`has_salary`, `has_location`, `has_company_profile`, etc.).
-        3. **Vectorization** — TF-IDF (unigrams + bigrams, 20,000 features) for text,
+        3. **Vectorization** — TF-IDF (unigrams + bigrams, 10,000 features) for text,
            StandardScaler for numeric features.
-        4. **Class imbalance handling** — SMOTE / Random Over-Sampling on the training folds only.
+        4. **Class imbalance handling** — Random Over-Sampling on the training folds only.
         5. **Stacking** — 4 base learners feed a Logistic Regression meta-learner (5-fold CV).
         """
     )
